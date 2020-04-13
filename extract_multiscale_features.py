@@ -12,6 +12,8 @@ import keyNet.aux.desc_aux_function as loss_desc
 from keyNet.model.hardnet import *
 from keyNet.datasets.dataset_utils import read_bw_image
 
+from tqdm import tqdm
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 def check_directory(dir):
@@ -277,28 +279,49 @@ def extract_multiscale_features():
 
             # read image and extract keypoints and descriptors
             f = open(args.list_images, "r")
-            for path_to_image in f:
+            lines = f.readlines()
+            for path_to_image in tqdm(lines):
                 path = path_to_image.split('\n')[0]
 
                 if not os.path.exists(path):
                     print('[ERROR]: File {0} not found!'.format(path))
                     return
 
-                create_result_dir(os.path.join(args.results_dir, version_network_name, path))
+                # create_result_dir(os.path.join(args.results_dir, version_network_name, path))
 
                 im = read_bw_image(path)
-
+                print(im.shape)
+                
+                # Image is resized via opencv.
+                max_edge = 1600
+                interp = cv2.INTER_AREA
+                h, w, _ = im.shape
+                scale_factor = max(1., h / max_edge, w / max_edge)
+                im = cv2.resize(im, None, fx=(1 / scale_factor), fy=(1 / scale_factor), interpolation=interp)
+                
+                # Normalization.
                 im = im.astype(float) / im.max()
+                
+                try:
+                    # Prediction.
+                    im_pts, descriptors = extract_features(im)
+                    
+                    # Separate scores and keypoints.
+                    scores = im_pts[:, -1]
+                    im_pts = im_pts[:, : 3]
 
-                im_pts, descriptors = extract_features(im)
-
-                file_name = os.path.join(args.results_dir, version_network_name, path)+'.kpt'
-                np.save(file_name, im_pts)
-
-                file_name = os.path.join(args.results_dir, version_network_name, path)+'.dsc'
-                np.save(file_name, descriptors)
-
+                    # Upscale kypoints.
+                    im_pts[:, : 2] *= scale_factor
+                except:
+                    im_pts = np.zeros([0, 2])
+                    scores = np.zeros([0,])
+                    descriptors = np.zeros([0, 128])
+                
+                file_name = os.path.join(path) + '.keynet'
+                with open(file_name, 'wb') as f:
+                    np.savez(f, keypoints=im_pts, scores=scores, descriptors=descriptors)
 
 if __name__ == '__main__':
     extract_multiscale_features()
+
 
